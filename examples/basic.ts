@@ -42,7 +42,7 @@ async function main() {
     console.log('\nStarting user service discovery...');
     await userService.start();
 
-    // Give some time for discovery
+    // Give some time for discovery (increase for slower networks)
     setTimeout(() => {
       // You can manually filter the current registry
       const authFound = userService.filter({ name: 'auth' });

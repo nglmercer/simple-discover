@@ -18,7 +18,9 @@
     "undici-types": "^7.18.2"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts --target=node --outfile=index.js",
+    "build": "bun run build:js && bun run build:dts",
+    "build:js": "bun build ./src/index.ts --target=node --outfile=dist/index.js",
+    "build:dts": "tsc -p tsconfig.build.json",
     "test": "bun test"
   },
   "keywords": [],
