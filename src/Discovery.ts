@@ -81,10 +81,11 @@ export class Discovery extends EventEmitter {
   }
 
   private handleMessage(msg: Message, senderIp: string) {
+    if (!msg || !msg.service) return;
     if (msg.service.id === this.serviceInfo.id) return;
-
-    console.log(`[${this.serviceInfo.id}] Received ${msg.type} from ${msg.service.id}`);
-
+    
+    // console.log(`[${this.serviceInfo.id}] Receive ${msg.type} from ${msg.service.id}`);
+    
     if (msg.type === 'goodbye') {
       this.registry.remove(msg.service.id);
       return;

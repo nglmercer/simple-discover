@@ -31,3 +31,9 @@ process.on('SIGINT', () => {
 
 // Keep the main process alive until subprocesses exit
 await Promise.all([serviceA.exited, serviceB.exited]);
+//60s for timeout
+setTimeout(() => {
+  serviceA.kill();
+  serviceB.kill();
+  process.exit();
+}, 60000);

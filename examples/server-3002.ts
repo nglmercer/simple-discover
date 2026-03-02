@@ -30,16 +30,11 @@ const discovery = new Discovery(
     version: '1.0.0',
   },
   server.port,
-  {
-    multicastInterface: '127.0.0.1'
-  }
 );
 
 // 3. Setup Discovery Events
 discovery.on('online', (service) => {
-  console.log(`[Service B] New service found: ${service.name} (${service.id}) at ${service.ip}:${service.port}`);
-  
-  // If we found Service A, let's try to call it!
+  console.log(`[Service B] Found: ${service.name} at ${service.ip}:${service.port}`);
   if (service.name === 'service-a') {
     callServiceA();
   }
@@ -52,6 +47,11 @@ discovery.on('offline', (service) => {
 // 4. Start Discovery
 await discovery.start();
 console.log('[Service B] Discovery started...');
+
+// Retry discovery after a bit
+setTimeout(() => {
+    (discovery as any).network.broadcastPresence('hello');
+}, 3000);
 
 // Helper to call Service A using the built-in HttpClient
 async function callServiceA() {
