@@ -1,5 +1,5 @@
 export interface ServiceInfo {
-  id: string;
+  id?: string;
   name?: string;
   version?: string;
   schema?: string;
@@ -22,5 +22,5 @@ export interface DiscoveryOptions {
 
 export interface Message {
   type: 'hello' | 'heartbeat' | 'goodbye';
-  service: ServiceInfo & { port: number };
+  service: ServiceInfo & { id: string; port: number };
 }

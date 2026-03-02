@@ -1,8 +1,17 @@
 import { EventEmitter } from 'events';
+import os from 'os';
+import crypto from 'crypto';
 import type { DiscoveryOptions, ServiceInfo, DiscoveredService, Message } from './types';
 import { Registry } from './modules/Registry';
 import { Network } from './modules/Network';
 import { ClientFactory } from './modules/ClientFactory';
+
+function generateServiceId(name?: string): string {
+  const random = crypto.randomBytes(4).toString('hex');
+  const hostname = os.hostname().replace(/[^a-zA-Z0-9]/g, '-').substring(0, 8);
+  const prefix = name ? `${name}-` : 'service';
+  return `${prefix}-${hostname}-${random}`;
+}
 
 export class Discovery extends EventEmitter {
   private serviceInfo: ServiceInfo;
@@ -20,10 +29,12 @@ export class Discovery extends EventEmitter {
 
   constructor(serviceInfo: ServiceInfo, port: number, options: DiscoveryOptions = {}) {
     super();
-    if (!serviceInfo.id) throw new Error('Service id is mandatory');
+    
+    // Auto-generate ID if not provided
+    const serviceId = serviceInfo.id || generateServiceId(serviceInfo.name);
     
     this.serviceInfo = {
-      id: serviceInfo.id,
+      id: serviceId,
       name: serviceInfo.name,
       version: serviceInfo.version,
       schema: serviceInfo.schema || 'http'
@@ -135,5 +146,9 @@ export class Discovery extends EventEmitter {
   // Getters for testing
   getInternalRegistry() {
     return this.registry;
+  }
+
+  getServiceId(): string {
+    return this.serviceInfo.id as string;
   }
 }

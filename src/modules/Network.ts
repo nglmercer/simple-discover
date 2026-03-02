@@ -58,6 +58,7 @@ export class Network extends EventEmitter {
       type,
       service: {
         ...this.serviceInfo,
+        id: this.serviceInfo.id!, // ID is always set after constructor processes it
         port: this.port
       }
     };

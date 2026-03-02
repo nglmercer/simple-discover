@@ -399,13 +399,15 @@ describe("Discovery P2P", () => {
     service3.stop();
   });
 
-  it("should require service id in constructor", () => {
-    expect(() => {
-      new Discovery(
-        { id: "", name: "test" }, // Empty id
-        3000,
-        { setupHooks: false }
-      );
-    }).toThrow("Service id is mandatory");
+  it("should auto-generate service id when not provided", () => {
+    const discovery = new Discovery(
+      { name: "test" }, // No id provided
+      3000,
+      { setupHooks: false }
+    );
+    
+    expect(discovery.getServiceId()).toBeDefined();
+    expect(discovery.getServiceId()).toContain("test-");
+    discovery.stop();
   });
 });
