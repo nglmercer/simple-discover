@@ -1,0 +1,27 @@
+{
+  "name": "discover",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "version": "1.0.0",
+  "description": "To install dependencies:",
+  "main": "index.js",
+  "dependencies": {
+    "bun-types": "^1.3.9",
+    "typescript": "^5.9.3",
+    "undici-types": "^7.18.2"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts --target=node --outfile=index.js",
+    "test": "bun test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
