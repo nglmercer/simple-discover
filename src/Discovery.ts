@@ -71,6 +71,7 @@ export class Discovery extends EventEmitter {
         this.socket.setMulticastLoopback(true);
         if (this.options.multicastInterface) {
           this.socket.addMembership(this.options.multicastAddress, this.options.multicastInterface);
+          this.socket.setMulticastInterface(this.options.multicastInterface);
         } else {
           this.socket.addMembership(this.options.multicastAddress);
         }
