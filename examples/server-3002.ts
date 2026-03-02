@@ -48,11 +48,6 @@ discovery.on('offline', (service) => {
 await discovery.start();
 console.log('[Service B] Discovery started...');
 
-// Retry discovery after a bit
-setTimeout(() => {
-    (discovery as any).network.broadcastPresence('hello');
-}, 3000);
-
 // Helper to call Service A using the built-in HttpClient
 async function callServiceA() {
   try {

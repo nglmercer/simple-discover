@@ -2,7 +2,7 @@ import dgram from 'dgram';
 import os from 'os';
 import { EventEmitter } from 'events';
 import type { Message, DiscoveryOptions, ServiceInfo } from '../types';
-
+import { logger } from './debug';
 export class Network extends EventEmitter {
   private socket: dgram.Socket | null = null;
   private senderSocket: dgram.Socket | null = null;
@@ -65,6 +65,23 @@ export class Network extends EventEmitter {
       
       this.socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
       this.senderSocket = dgram.createSocket({ type: 'udp4' });
+      
+      let pendingBinds = 2; // Needs to bind both sockets
+      const checkDone = () => {
+          pendingBinds--;
+          if (pendingBinds === 0) {
+              logger.log(`[Discovery] Multicast bound to ${iface}:${this.options.multicastPort}`);
+              resolve();
+          }
+      };
+      
+      this.senderSocket.bind(0, () => {
+        try {
+          this.senderSocket!.setMulticastTTL(64);
+          this.senderSocket!.setMulticastLoopback(true);
+        } catch (e) {}
+        checkDone();
+      });
 
       this.socket.on('error', (err) => {
         this.emit('error', err);
@@ -104,8 +121,7 @@ export class Network extends EventEmitter {
             } catch(e) {}
           }
           
-          console.log(`[Discovery] Multicast bound to ${iface}:${this.options.multicastPort}`);
-          resolve();
+          checkDone();
         } catch (e: any) {
           reject(e);
         }
@@ -114,7 +130,7 @@ export class Network extends EventEmitter {
   }
 
   broadcastPresence(type: Message['type']): void {
-    if (!this.socket) return;
+    if (!this.senderSocket) return;
 
     const message: Message = {
       type,
@@ -130,10 +146,10 @@ export class Network extends EventEmitter {
     // If we have a specific multicast interface, use it
     if (this.options.multicastInterface) {
         try {
-            this.socket.setMulticastInterface(this.options.multicastInterface);
-            this.socket.send(buffer, 0, buffer.length, this.options.multicastPort, this.options.multicastAddress);
+            this.senderSocket.setMulticastInterface(this.options.multicastInterface);
+            this.senderSocket.send(buffer, 0, buffer.length, this.options.multicastPort, this.options.multicastAddress);
         } catch(e) {
-            console.log(`[Discovery] Failed to broadcast on specific interface ${this.options.multicastInterface}:`, e);
+            logger.log(`[Discovery] Failed to broadcast on specific interface ${this.options.multicastInterface}:`, e);
         }
         return;
     }
@@ -144,13 +160,13 @@ export class Network extends EventEmitter {
         if (index >= addresses.length) return;
         const addr = addresses[index];
         try {
-            this.socket!.setMulticastInterface(addr!);
-            this.socket!.send(buffer, 0, buffer.length, this.options.multicastPort, this.options.multicastAddress!, (err) => {
-                if (err) console.log(`[Discovery] Broadcast error on ${addr}:`, err);
+            this.senderSocket!.setMulticastInterface(addr!);
+            this.senderSocket!.send(buffer, 0, buffer.length, this.options.multicastPort, this.options.multicastAddress!, (err) => {
+                if (err) logger.log(`[Discovery] Broadcast error on ${addr}:`, err);
                 sendSequentially(index + 1);
             });
         } catch (e) {
-            console.log(`[Discovery] Failed to broadcast on ${addr}:`, e);
+            logger.log(`[Discovery] Failed to broadcast on ${addr}:`, e);
             sendSequentially(index + 1);
         }
     };
