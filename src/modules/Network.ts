@@ -97,9 +97,9 @@ export class Network extends EventEmitter {
         }
       });
 
-      // Bind to the specific interface or 0.0.0.0
-      const bindAddress = iface === '0.0.0.0' ? undefined : iface;
-      this.socket.bind(this.options.multicastPort, bindAddress, () => {
+      // Always bind to undefined (0.0.0.0) to allow receiving multicast packets
+      // The interface separation is handled by addMembership below.
+      this.socket.bind(this.options.multicastPort, undefined, () => {
         if (!this.socket) return;
         
         try {
@@ -107,7 +107,7 @@ export class Network extends EventEmitter {
           this.socket.setMulticastTTL(64);
           this.socket.setMulticastLoopback(true);
           
-          // For 0.0.0.0, we need to add membership to a specific interface
+          // For 0.0.0.0, we need to add membership to all interfaces
           if (iface === '0.0.0.0') {
             const addresses = this.getLocalInterfaces();
             for (const addr of addresses) {
@@ -117,6 +117,7 @@ export class Network extends EventEmitter {
             }
           } else {
             try {
+              // Add membership to the explicitly requested interface
               this.socket.addMembership(this.options.multicastAddress, iface);
             } catch(e) {}
           }

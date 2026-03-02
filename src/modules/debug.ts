@@ -1,5 +1,5 @@
 export class Logger {
-  private enabled = true;
+  private enabled = false;
 
   enable() {
     this.enabled = true;
