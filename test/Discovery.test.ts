@@ -79,8 +79,9 @@ describe("Discovery P2P", () => {
     // This is more reliable than depending on UDP message delivery in tests
     const service2Info = service1.filter({ id: "service-2" })[0];
     if (service2Info) {
-      service1['registry'].delete("service-2");
-      service1.emit("offline", service2Info);
+      service1['registry'].remove("service-2");
+      // The emit happens internally now so we don't need to manually emit for the test if remove does it.
+      // service1.emit("offline", service2Info); 
     }
     
     service2.stop(); // This sends goodbye message
@@ -125,16 +126,10 @@ describe("Discovery P2P", () => {
     const service3Info = service1.filter({ id: "service-3" })[0];
     if (service3Info) {
       service3Info.lastSeen = Date.now() - 200; // Make it appear old
-      service1['registry'].set("service-3", service3Info);
+      service1['registry'].update("service-3", service3Info);
       
       // Manually trigger the timeout check
-      const now = Date.now();
-      for (const [id, service] of service1['registry'].entries()) {
-        if (now - service.lastSeen > 100) { // Use the timeout value
-          service1['registry'].delete(id);
-          service1.emit('offline', service);
-        }
-      }
+      service1['registry'].checkOffline(100);
     }
     
     // Wait for event processing
@@ -198,10 +193,8 @@ describe("Discovery P2P", () => {
         ...existingService,
         version: "3.0.0"
       };
-      service1['registry'].set("service-2", changedService);
-      
-      // Emit online event for the change
-      service1.emit("online", changedService);
+      service1['registry'].update("service-2", changedService);
+      // emit is handled by update
     }
 
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -264,13 +257,11 @@ describe("Discovery P2P", () => {
     const service3Info = service1.filter({ id: "service-3" })[0];
     
     if (service2Info) {
-      service1['registry'].delete("service-2");
-      service1.emit("offline", service2Info);
+      service1['registry'].remove("service-2");
     }
     
     if (service3Info) {
-      service1['registry'].delete("service-3");
-      service1.emit("offline", service3Info);
+      service1['registry'].remove("service-3");
     }
 
     service2.stop();

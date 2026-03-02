@@ -1,18 +1,18 @@
-import dgram from 'dgram';
 import { EventEmitter } from 'events';
-import type { 
-  DiscoveryOptions, 
-  ServiceInfo, 
-  DiscoveredService, 
-  Message 
-} from './types';
+import type { DiscoveryOptions, ServiceInfo, DiscoveredService, Message } from './types';
+import { Registry } from './modules/Registry';
+import { Network } from './modules/Network';
+import { ClientFactory } from './modules/ClientFactory';
 
 export class Discovery extends EventEmitter {
   private serviceInfo: ServiceInfo;
   private port: number;
   private options: Required<DiscoveryOptions>;
-  private socket: dgram.Socket | null = null;
-  private registry: Map<string, DiscoveredService> = new Map();
+  
+  private registry: Registry;
+  private network: Network;
+  private clientFactory: ClientFactory;
+  
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private checkOfflineTimer: ReturnType<typeof setInterval> | null = null;
   private processHooksSet = false;
@@ -39,139 +39,67 @@ export class Discovery extends EventEmitter {
       setupHooks: options.setupHooks !== undefined ? options.setupHooks : true
     };
 
+    this.registry = new Registry();
+    this.network = new Network(this.serviceInfo, this.port, this.options);
+    this.clientFactory = new ClientFactory(this.filter.bind(this));
+
     this.onProcessExit = () => {
       this.stop();
       process.exit();
     };
+
+    this.setupEvents();
+  }
+
+  private setupEvents() {
+    this.registry.on('online', (service: DiscoveredService) => this.emit('online', service));
+    this.registry.on('offline', (service: DiscoveredService) => this.emit('offline', service));
+
+    this.network.on('error', (err: Error) => this.emit('error', err));
+    this.network.on('message', (msg: Message, senderIp: string) => this.handleMessage(msg, senderIp));
   }
 
   async start(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
-
-      this.socket.on('error', (err) => {
-        this.emit('error', err);
-        reject(err);
-      });
-
-      this.socket.on('message', (msg, rinfo) => {
-        try {
-          const data = JSON.parse(msg.toString()) as Message;
-          console.log(`[${this.serviceInfo.id}] Received ${data.type} from ${data.service.id}`);
-          this.handleMessage(data, rinfo.address);
-        } catch (e) {
-          // Ignore invalid messages
-        }
-      });
-
-      this.socket.bind(this.options.multicastPort, () => {
-        if (!this.socket) return;
-        this.socket.setBroadcast(true);
-        this.socket.setMulticastTTL(128);
-        this.socket.setMulticastLoopback(true);
-        if (this.options.multicastInterface) {
-          this.socket.addMembership(this.options.multicastAddress, this.options.multicastInterface);
-          this.socket.setMulticastInterface(this.options.multicastInterface);
-        } else {
-          this.socket.addMembership(this.options.multicastAddress);
-        }
-        
-        this.broadcastPresence('hello');
-        this.startTimers();
-        if (this.options.setupHooks && !this.processHooksSet) {
-          this.setupProcessHooks();
-        }
-        
-        resolve();
-      });
-    });
+    await this.network.start();
+    
+    this.network.broadcastPresence('hello');
+    this.startTimers();
+    if (this.options.setupHooks && !this.processHooksSet) {
+      this.setupProcessHooks();
+    }
   }
 
   private handleMessage(msg: Message, senderIp: string) {
     if (msg.service.id === this.serviceInfo.id) return;
 
-    const now = Date.now();
-    const existing = this.registry.get(msg.service.id);
+    console.log(`[${this.serviceInfo.id}] Received ${msg.type} from ${msg.service.id}`);
 
     if (msg.type === 'goodbye') {
-      if (existing) {
-        this.registry.delete(msg.service.id);
-        this.emit('offline', existing);
-      }
+      this.registry.remove(msg.service.id);
       return;
     }
 
     const discoveredService: DiscoveredService = {
       ...msg.service,
       ip: senderIp,
-      lastSeen: now,
+      lastSeen: Date.now(),
     };
 
-    if (!existing) {
-      this.registry.set(msg.service.id, discoveredService);
-      this.emit('online', discoveredService);
-    } else {
-      let changed = false;
-      if (existing.ip !== senderIp || existing.port !== msg.service.port || existing.version !== msg.service.version) {
-        changed = true;
-      }
-      this.registry.set(msg.service.id, discoveredService);
-      if (changed) {
-        this.emit('online', discoveredService);
-      }
-    }
-  }
-
-  private broadcastPresence(type: Message['type']) {
-    if (!this.socket) return;
-
-    const message: Message = {
-      type,
-      service: {
-        ...this.serviceInfo,
-        port: this.port
-      }
-    };
-
-    const buffer = Buffer.from(JSON.stringify(message));
-    this.socket.send(
-      buffer,
-      0,
-      buffer.length,
-      this.options.multicastPort,
-      this.options.multicastAddress
-    );
+    this.registry.update(msg.service.id, discoveredService);
   }
 
   private startTimers() {
     this.heartbeatTimer = setInterval(() => {
-      this.broadcastPresence('heartbeat');
+      this.network.broadcastPresence('heartbeat');
     }, this.options.heartbeatInterval);
 
     this.checkOfflineTimer = setInterval(() => {
-      const now = Date.now();
-      for (const [id, service] of this.registry.entries()) {
-        if (now - service.lastSeen > this.options.offlineTimeout) {
-          this.registry.delete(id);
-          this.emit('offline', service);
-        }
-      }
+      this.registry.checkOffline(this.options.offlineTimeout);
     }, 1000);
   }
 
   filter(criteria: Partial<ServiceInfo>): DiscoveredService[] {
-    const results: DiscoveredService[] = [];
-    for (const service of this.registry.values()) {
-      let match = true;
-      if (criteria.id && criteria.id !== service.id) match = false;
-      if (criteria.name && criteria.name !== service.name) match = false;
-      if (criteria.version && criteria.version !== service.version) match = false;
-      
-      if (match) {
-        results.push(service);
-      }
-    }
-    return results;
+    return this.registry.filter(criteria);
   }
 
   private setupProcessHooks() {
@@ -189,44 +117,23 @@ export class Discovery extends EventEmitter {
   }
 
   stop() {
-    this.broadcastPresence('goodbye');
+    this.network.broadcastPresence('goodbye');
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     if (this.checkOfflineTimer) clearInterval(this.checkOfflineTimer);
-    if (this.socket) {
-      try {
-        if (this.options.setupHooks) {
-          this.removeProcessHooks();
-        }
-        this.socket.close();
-      } catch (e) {}
-      this.socket = null;
+    
+    if (this.options.setupHooks) {
+      this.removeProcessHooks();
     }
+    
+    this.network.stop();
   }
 
   createClient(nameOrId: string) {
-    return {
-      get: async (path: string, options?: RequestInit) => this.fetchInternal(nameOrId, path, { ...options, method: 'GET' }),
-      post: async (path: string, options?: RequestInit) => this.fetchInternal(nameOrId, path, { ...options, method: 'POST' }),
-      put: async (path: string, options?: RequestInit) => this.fetchInternal(nameOrId, path, { ...options, method: 'PUT' }),
-      delete: async (path: string, options?: RequestInit) => this.fetchInternal(nameOrId, path, { ...options, method: 'DELETE' }),
-    };
+    return this.clientFactory.createClient(nameOrId);
   }
 
-  private async fetchInternal(nameOrId: string, path: string, options: RequestInit) {
-    let services = this.filter({ name: nameOrId });
-    if (services.length === 0) {
-      services = this.filter({ id: nameOrId });
-    }
-    
-    if (services.length === 0) {
-      throw new Error(`Service ${nameOrId} not found`);
-    }
-
-    const target = services[0];
-    if (!target) {
-      throw new Error(`Service ${nameOrId} not found`);
-    }
-    const url = `${target.schema}://${target.ip}:${target.port}${path}`;
-    return fetch(url, options);
+  // Getters for testing
+  getInternalRegistry() {
+    return this.registry;
   }
 }
