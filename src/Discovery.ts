@@ -97,6 +97,11 @@ export class Discovery extends EventEmitter {
     };
 
     this.registry.update(msg.service.id, discoveredService);
+
+    // Speed up discovery: if someone says hello, tell them where we are
+    if (msg.type === 'hello') {
+      this.network.broadcastPresence('heartbeat');
+    }
   }
 
   private startTimers() {
