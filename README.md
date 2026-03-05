@@ -103,12 +103,22 @@ const service = discovery.filter({ id: "auth-service-1" });
 const v1Services = discovery.filter({ name: "api", version: "1.0.0" });
 ```
 
-##### `createClient(nameOrId: string): HttpClient`
+##### `createClient(criteria: string | Partial<ServiceInfo>, loadBalancer?: 'first' | 'random' | 'round-robin'): HttpClient`
 
-Create an HTTP client for a discovered service.
+Create an HTTP client for a discovered service. You can pass a string (service name or ID), or an object with specific criteria to select the precise service to proxy. By default, it balances traffic using `round-robin`.
 
 ```typescript
+// Basic syntax using a name
 const client = discovery.createClient("users");
+
+// Targeting a specific version or port across multiple services
+const customClient = discovery.createClient({
+  name: "users",
+  version: "2.0.0",
+});
+
+// Choosing a specific load balancer behavior (first, random, round-robin)
+const randomClient = discovery.createClient("users", "random");
 
 // Use like a regular fetch client
 await client.get("/api/users");
@@ -234,8 +244,18 @@ const userService2 = new Discovery(
 
 await Promise.all([userService1.start(), userService2.start()]);
 
-// The client will automatically load balance to the first discovered service
+// The client will automatically load balance using 'round-robin' by default
 const client = discovery.createClient("users");
+
+// If you want to force specific behavior
+const firstOnlyClient = discovery.createClient("users", "first");
+const randomizedClient = discovery.createClient("users", "random");
+
+// You can also target specifically by criteria
+const specificPortClient = discovery.createClient({
+  name: "users",
+  port: 3002,
+});
 ```
 
 ### Custom Configuration

@@ -4,29 +4,53 @@ export class ClientFactory {
   // Pass a filter function so that the Factory does not depend strongly on Registry
   constructor(private filterServices: (criteria: Partial<ServiceInfo>) => DiscoveredService[]) {}
 
-  createClient(nameOrId: string) {
+  createClient(criteria: string | Partial<ServiceInfo>, loadBalancer: 'first' | 'random' | 'round-robin' = 'round-robin') {
+    let rrIndex = 0;
+    
     return {
-      get: async (path: string, options?: RequestInit) => this.fetchInternal(nameOrId, path, { ...options, method: 'GET' }),
-      post: async (path: string, options?: RequestInit) => this.fetchInternal(nameOrId, path, { ...options, method: 'POST' }),
-      put: async (path: string, options?: RequestInit) => this.fetchInternal(nameOrId, path, { ...options, method: 'PUT' }),
-      delete: async (path: string, options?: RequestInit) => this.fetchInternal(nameOrId, path, { ...options, method: 'DELETE' }),
+      get: async (path: string, options?: RequestInit) => this.fetchInternal(criteria, path, { ...options, method: 'GET' }, loadBalancer, () => rrIndex++),
+      post: async (path: string, options?: RequestInit) => this.fetchInternal(criteria, path, { ...options, method: 'POST' }, loadBalancer, () => rrIndex++),
+      put: async (path: string, options?: RequestInit) => this.fetchInternal(criteria, path, { ...options, method: 'PUT' }, loadBalancer, () => rrIndex++),
+      delete: async (path: string, options?: RequestInit) => this.fetchInternal(criteria, path, { ...options, method: 'DELETE' }, loadBalancer, () => rrIndex++),
     };
   }
 
-  private async fetchInternal(nameOrId: string, path: string, options: RequestInit) {
-    let services = this.filterServices({ name: nameOrId });
-    if (services.length === 0) {
-      services = this.filterServices({ id: nameOrId });
+  private async fetchInternal(
+    criteria: string | Partial<ServiceInfo>, 
+    path: string, 
+    options: RequestInit, 
+    loadBalancer: 'first' | 'random' | 'round-robin',
+    getRrIndex: () => number
+  ) {
+    let services: DiscoveredService[] = [];
+    
+    if (typeof criteria === 'string') {
+      services = this.filterServices({ name: criteria });
+      if (services.length === 0) {
+        services = this.filterServices({ id: criteria });
+      }
+    } else {
+      services = this.filterServices(criteria);
     }
 
     if (services.length === 0) {
-      throw new Error(`Service ${nameOrId} not found`);
+      const name = typeof criteria === 'string' ? criteria : JSON.stringify(criteria);
+      throw new Error(`Service ${name} not found`);
     }
 
-    // simplistic load balancing (could pick random or round robin)
-    const target = services[0];
+    let target = services[0];
+    
+    if (services.length > 1) {
+      if (loadBalancer === 'random') {
+        target = services[Math.floor(Math.random() * services.length)];
+      } else if (loadBalancer === 'round-robin') {
+        target = services[getRrIndex() % services.length];
+      }
+    }
+
     if (!target) {
-      throw new Error(`Service ${nameOrId} not found`);
+      const name = typeof criteria === 'string' ? criteria : JSON.stringify(criteria);
+      throw new Error(`Service ${name} not found`);
     }
     const url = `${target.schema}://${target.ip}:${target.port}${path}`;
     return fetch(url, options);

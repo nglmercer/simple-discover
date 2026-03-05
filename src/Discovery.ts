@@ -145,8 +145,8 @@ export class Discovery extends EventEmitter {
     this.network.stop();
   }
 
-  createClient(nameOrId: string) {
-    return this.clientFactory.createClient(nameOrId);
+  createClient(criteria: string | Partial<ServiceInfo>, loadBalancer?: 'first' | 'random' | 'round-robin') {
+    return this.clientFactory.createClient(criteria, loadBalancer);
   }
 
   // Getters for testing
