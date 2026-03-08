@@ -116,31 +116,33 @@ describe("Discovery P2P", () => {
       }
     });
     
-    await service1.start();
-    await service3.start();
-    
-    // Wait for online discovery
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    
-    // Manually trigger timeout by simulating old lastSeen and forcing a check
-    const service3Info = service1.filter({ id: "service-3" })[0];
-    if (service3Info) {
-      service3Info.lastSeen = Date.now() - 200; // Make it appear old
-      service1['registry'].update("service-3", service3Info);
+    try {
+      await service1.start();
+      await service3.start();
       
-      // Manually trigger the timeout check
-      service1['registry'].checkOffline(100);
+      // Wait for online discovery
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      
+      // Manually trigger timeout by simulating old lastSeen and forcing a check
+      const service3Info = service1.filter({ id: "service-3" })[0];
+      if (service3Info) {
+        service3Info.lastSeen = Date.now() - 200; // Make it appear old
+        service1['registry'].update("service-3", service3Info);
+        
+        // Manually trigger the timeout check
+        service1['registry'].checkOffline(100);
+      }
+      
+      // Wait for event processing
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      
+      expect(offlineTriggered).toBe(true);
+      
+      const filtered = service1.filter({ id: "service-3" });
+      expect(filtered.length).toBe(0);
+    } finally {
+      service3.stop();
     }
-    
-    // Wait for event processing
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    
-    expect(offlineTriggered).toBe(true);
-    
-    const filtered = service1.filter({ id: "service-3" });
-    expect(filtered.length).toBe(0);
-    
-    service3.stop();
   });
 
   it("should filter services by name", async () => {
@@ -150,24 +152,26 @@ describe("Discovery P2P", () => {
       { setupHooks: false, multicastPort: 54329, multicastInterface: '127.0.0.1' }
     );
 
-    await service1.start();
-    await service2.start();
-    await service3.start();
+    try {
+      await service1.start();
+      await service2.start();
+      await service3.start();
 
-    // Wait for discovery
-    await new Promise((resolve) => setTimeout(resolve, 500));
+      // Wait for discovery
+      await new Promise((resolve) => setTimeout(resolve, 500));
 
-    const userServices = service1.filter({ name: "users" });
-    expect(userServices.length).toBe(2);
-    
-    const authServices = service1.filter({ name: "auth" });
-    expect(authServices.length).toBe(0); // service1 won't discover itself
-    
-    const specificService = service1.filter({ id: "service-2" });
-    expect(specificService.length).toBe(1);
-    expect(specificService[0]!.name).toBe("users");
-    
-    service3.stop();
+      const userServices = service1.filter({ name: "users" });
+      expect(userServices.length).toBe(2);
+      
+      const authServices = service1.filter({ name: "auth" });
+      expect(authServices.length).toBe(0); // service1 won't discover itself
+      
+      const specificService = service1.filter({ id: "service-2" });
+      expect(specificService.length).toBe(1);
+      expect(specificService[0]!.name).toBe("users");
+    } finally {
+      service3.stop();
+    }
   });
 
   it("should handle service info changes", async () => {
@@ -239,45 +243,48 @@ describe("Discovery P2P", () => {
     service1.on("online", (service) => onlineServices.add(service.id));
     service1.on("offline", (service) => offlineServices.add(service.id));
 
-    await service1.start();
-    await service2.start();
-    await service3.start();
-    await service4.start();
+    try {
+      await service1.start();
+      await service2.start();
+      await service3.start();
+      await service4.start();
 
-    // Wait for discovery
-    await new Promise((resolve) => setTimeout(resolve, 500));
+      // Wait for discovery
+      await new Promise((resolve) => setTimeout(resolve, 500));
 
-    expect(onlineServices.size).toBe(3); // service2, service3, service4
-    expect(onlineServices.has("service-2")).toBe(true);
-    expect(onlineServices.has("service-3")).toBe(true);
-    expect(onlineServices.has("service-4")).toBe(true);
+      expect(onlineServices.size).toBe(3); // service2, service3, service4
+      expect(onlineServices.has("service-2")).toBe(true);
+      expect(onlineServices.has("service-3")).toBe(true);
+      expect(onlineServices.has("service-4")).toBe(true);
 
-    // Manually trigger offline events for service2 and service3
-    const service2Info = service1.filter({ id: "service-2" })[0];
-    const service3Info = service1.filter({ id: "service-3" })[0];
-    
-    if (service2Info) {
-      service1['registry'].remove("service-2");
+      // Manually trigger offline events for service2 and service3
+      const service2Info = service1.filter({ id: "service-2" })[0];
+      const service3Info = service1.filter({ id: "service-3" })[0];
+      
+      if (service2Info) {
+        service1['registry'].remove("service-2");
+      }
+      
+      if (service3Info) {
+        service1['registry'].remove("service-3");
+      }
+
+      service2.stop();
+      service3.stop();
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(offlineServices.has("service-2")).toBe(true);
+      expect(offlineServices.has("service-3")).toBe(true);
+
+      // service4 should still be online
+      const remainingServices = service1.filter({});
+      const service4Found = remainingServices.some(s => s.id === "service-4");
+      expect(service4Found).toBe(true);
+    } finally {
+      service3.stop();
+      service4.stop();
     }
-    
-    if (service3Info) {
-      service1['registry'].remove("service-3");
-    }
-
-    service2.stop();
-    service3.stop();
-
-    await new Promise((resolve) => setTimeout(resolve, 100));
-
-    expect(offlineServices.has("service-2")).toBe(true);
-    expect(offlineServices.has("service-3")).toBe(true);
-
-    // service4 should still be online
-    const remainingServices = service1.filter({});
-    const service4Found = remainingServices.some(s => s.id === "service-4");
-    expect(service4Found).toBe(true);
-
-    service4.stop();
   });
 
   it("should create client for discovered service", async () => {
@@ -330,17 +337,19 @@ describe("Discovery P2P", () => {
       }
     });
 
-    await service1.start();
-    await service3.start();
+    try {
+      await service1.start();
+      await service3.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 500));
 
-    expect(discovered).toBe(true);
-    
-    const filtered = service1.filter({ id: "service-3" });
-    expect(filtered.length).toBe(1);
-    
-    service3.stop();
+      expect(discovered).toBe(true);
+      
+      const filtered = service1.filter({ id: "service-3" });
+      expect(filtered.length).toBe(1);
+    } finally {
+      service3.stop();
+    }
   });
 
   it("should handle error events", async () => {
@@ -377,26 +386,28 @@ describe("Discovery P2P", () => {
       { setupHooks: false, multicastPort: 54329, multicastInterface: '127.0.0.1' }
     );
 
-    await service1.start();
-    await service2.start();
-    await service3.start();
+    try {
+      await service1.start();
+      await service2.start();
+      await service3.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 500));
 
-    // Filter by name only
-    const byName = service1.filter({ name: "users" });
-    expect(byName.length).toBe(2);
+      // Filter by name only
+      const byName = service1.filter({ name: "users" });
+      expect(byName.length).toBe(2);
 
-    // Filter by name and version
-    const byNameAndVersion = service1.filter({ name: "users", version: "2.0.0" });
-    expect(byNameAndVersion.length).toBe(1);
-    expect(byNameAndVersion[0]!.id).toBe("service-2");
+      // Filter by name and version
+      const byNameAndVersion = service1.filter({ name: "users", version: "2.0.0" });
+      expect(byNameAndVersion.length).toBe(1);
+      expect(byNameAndVersion[0]!.id).toBe("service-2");
 
-    // Filter by non-existent combination
-    const noMatch = service1.filter({ name: "users", version: "99.0.0" });
-    expect(noMatch.length).toBe(0);
-
-    service3.stop();
+      // Filter by non-existent combination
+      const noMatch = service1.filter({ name: "users", version: "99.0.0" });
+      expect(noMatch.length).toBe(0);
+    } finally {
+      service3.stop();
+    }
   });
 
   it("should auto-generate service id when not provided", () => {
@@ -445,8 +456,8 @@ describe("Discovery P2P", () => {
     
     await testService.start();
     
-    // Wait for setIntervals to run at least once
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    // Wait for setIntervals to run at least once (check is hardcoded to 1000ms)
+    await new Promise((resolve) => setTimeout(resolve, 1050));
 
     testService.stop();
     // No direct observable here besides coverage metrics hitting the inner functions
