@@ -1,4 +1,4 @@
-import { Discovery } from '../src';
+import { Discovery, IdentityServer } from '../src';
 
 /**
  * STARTING SERVICE A (PORT 3001)
@@ -11,6 +11,20 @@ server = Bun.serve({
   port: 0,
   fetch(req) {
     const url = new URL(req.url);
+    // Identity endpoint for network scanners
+    if (url.pathname === '/.well-known/discover') {
+      // NOTE: For Bun.serve, we'll emulate the endpoint by passing the raw identity.
+      // We'll access the instance directly or expose a helper.
+      return new Response(JSON.stringify(discovery.getInternalRegistry().get(discovery.getServiceId()) || { 
+          id: discovery.getServiceId(), 
+          name: 'service-a', 
+          version: '1.0.0', 
+          schema: 'http', 
+          port: server.port 
+      }), {
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+      });
+    }
     if (url.pathname === '/hello') {
       return new Response(JSON.stringify({ message: 'Hello from Service A!', from: server.port.toString() }), {
         headers: { 'Content-Type': 'application/json' },

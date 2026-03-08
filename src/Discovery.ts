@@ -1,10 +1,12 @@
 import { EventEmitter } from 'events';
 import os from 'os';
 import crypto from 'crypto';
-import type { DiscoveryOptions, ServiceInfo, DiscoveredService, Message } from './types';
+import type { DiscoveryOptions, ServiceInfo, DiscoveredService, Message, ScanOptions, ScanResult } from './types';
 import { Registry } from './modules/Registry';
 import { Network } from './modules/Network';
 import { ClientFactory } from './modules/ClientFactory';
+import { NetworkScanner } from './modules/NetworkScanner';
+import { IdentityServer } from './modules/IdentityServer';
 
 function generateServiceId(name?: string): string {
   const random = crypto.randomBytes(4).toString('hex');
@@ -21,6 +23,7 @@ export class Discovery extends EventEmitter {
   private registry: Registry;
   private network: Network;
   private clientFactory: ClientFactory;
+  private identityServer: IdentityServer | null = null;
   
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private checkOfflineTimer: ReturnType<typeof setInterval> | null = null;
@@ -30,7 +33,6 @@ export class Discovery extends EventEmitter {
   constructor(serviceInfo: ServiceInfo, port: number, options: DiscoveryOptions = {}) {
     super();
     
-    // Auto-generate ID if not provided
     const serviceId = serviceInfo.id || generateServiceId(serviceInfo.name);
     
     this.serviceInfo = {
@@ -45,9 +47,12 @@ export class Discovery extends EventEmitter {
       multicastAddress: options.multicastAddress || '239.255.255.250',
       multicastInterface: options.multicastInterface || '',
       multicastPort: options.multicastPort || 54321,
+      broadcastPort: options.broadcastPort || 54322,
       heartbeatInterval: options.heartbeatInterval || 5000,
       offlineTimeout: options.offlineTimeout || 15000,
-      setupHooks: options.setupHooks !== undefined ? options.setupHooks : true
+      setupHooks: options.setupHooks !== undefined ? options.setupHooks : true,
+      enableBroadcast: options.enableBroadcast !== undefined ? options.enableBroadcast : true,
+      enableIdentityEndpoint: options.enableIdentityEndpoint !== undefined ? options.enableIdentityEndpoint : true,
     };
 
     this.registry = new Registry();
@@ -73,6 +78,14 @@ export class Discovery extends EventEmitter {
   async start(): Promise<void> {
     await this.network.start();
     
+    // Start the identity HTTP endpoint if enabled and port > 0
+    if (this.options.enableIdentityEndpoint && this.port > 0) {
+      this.identityServer = new IdentityServer(this.serviceInfo, this.port);
+      // Try to start standalone; if port is in use (e.g. your app is already on it), 
+      // this will silently skip. Use middleware() instead in that case.
+      await this.identityServer.startStandalone();
+    }
+    
     this.network.broadcastPresence('hello');
     this.startTimers();
     if (this.options.setupHooks && !this.processHooksSet) {
@@ -83,8 +96,6 @@ export class Discovery extends EventEmitter {
   private handleMessage(msg: Message, senderIp: string) {
     if (!msg || !msg.service) return;
     if (msg.service.id === this.serviceInfo.id) return;
-    
-    // console.log(`[${this.serviceInfo.id}] Receive ${msg.type} from ${msg.service.id}`);
     
     if (msg.type === 'goodbye') {
       this.registry.remove(msg.service.id);
@@ -99,7 +110,6 @@ export class Discovery extends EventEmitter {
 
     this.registry.update(msg.service.id, discoveredService);
 
-    // Speed up discovery: if someone says hello, tell them where we are
     if (msg.type === 'hello') {
       this.network.broadcastPresence('heartbeat');
     }
@@ -114,6 +124,46 @@ export class Discovery extends EventEmitter {
       this.registry.checkOffline(this.options.offlineTimeout);
     }, 1000);
   }
+
+  // ─── Scanning API ─────────────────────────────────────────────
+
+  /**
+   * Actively scan the local network for services.
+   * Uses TCP connect probing + HTTP identity detection.
+   * 
+   * Results are automatically registered in the internal registry.
+   * 
+   * @example
+   * const results = await discovery.scan({ ports: [3000, 3001, 8080] });
+   * results.forEach(r => console.log(`${r.ip}:${r.port} → ${r.service?.name}`));
+   */
+  async scan(options: ScanOptions = {}): Promise<ScanResult[]> {
+    const results = await NetworkScanner.scan(options);
+    
+    const registerResults = options.registerResults !== false;
+    if (registerResults) {
+      for (const result of results) {
+        if (result.service) {
+          this.registry.update(result.service.id!, result.service);
+        } else {
+          // Register unidentified open ports too
+          const service: DiscoveredService = {
+            id: `scan-${result.ip}-${result.port}`,
+            name: 'unknown',
+            ip: result.ip,
+            port: result.port,
+            schema: 'http',
+            lastSeen: Date.now(),
+          };
+          this.registry.update(service.id!, service);
+        }
+      }
+    }
+    
+    return results;
+  }
+
+  // ─── Existing API ─────────────────────────────────────────────
 
   filter(criteria: Partial<ServiceInfo>): DiscoveredService[] {
     return this.registry.filter(criteria);
@@ -143,10 +193,30 @@ export class Discovery extends EventEmitter {
     }
     
     this.network.stop();
+    
+    if (this.identityServer) {
+      this.identityServer.stop();
+      this.identityServer = null;
+    }
   }
 
   createClient(criteria: string | Partial<ServiceInfo>, loadBalancer?: 'first' | 'random' | 'round-robin') {
     return this.clientFactory.createClient(criteria, loadBalancer);
+  }
+
+  /**
+   * Get the identity server instance for middleware integration.
+   * Use this with Express/Hono/etc:
+   * 
+   * @example
+   * const app = express();
+   * app.use(discovery.getIdentityMiddleware());
+   */
+  getIdentityMiddleware() {
+    if (!this.identityServer) {
+      this.identityServer = new IdentityServer(this.serviceInfo, this.port);
+    }
+    return this.identityServer.middleware();
   }
 
   // Getters for testing
