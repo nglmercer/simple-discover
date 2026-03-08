@@ -5,11 +5,13 @@ A lightweight, zero-configuration P2P service discovery library for Node.js usin
 ## Features
 
 - **Zero Configuration** - Services discover each other automatically on the local network
-- **UDP Multicast** - Uses `239.255.255.250:54321` for service advertisement and discovery
-- **Automatic Heartbeat** - Services periodically announce their presence
-- **Offline Detection** - Automatically detects when services go offline
-- **HTTP Client Factory** - Built-in client to make HTTP requests to discovered services
-- **Event-Driven** - Emits `online` and `offline` events for dynamic service tracking
+- **Dual Stack Delivery** - Uses both UDP Multicast (`239.255.255.250`) and dynamic Subnet Broadcast seamlessly to cross most routers and firewalls.
+- **Active Network Scanning** - Built-in blazing fast TCP SYN scanner to discover services across the entire LAN segment safely.
+- **Auto Identity Endpoint** - Automatically exposes a `GET /.well-known/discover` identity endpoint for JSON metadata identification.
+- **Automatic Heartbeat** - Services periodically announce their presence over network.
+- **Offline Detection** - Automatically detects when services go offline via timeouts or graceful goodbye signals.
+- **HTTP Client Factory** - Built-in client proxy to seamlessly connect and load balance requests to discovered services.
+- **Event-Driven** - Emits `online` and `offline` events for your applications to subscribe and map the local network graph dynamically.
 
 ## Installation
 
@@ -74,11 +76,68 @@ new Discovery(serviceInfo: ServiceInfo, port: number, options?: DiscoveryOptions
   - `multicastAddress?: string` - Multicast address (default: '239.255.255.250')
   - `multicastInterface?: string` - Network interface to bind to
   - `multicastPort?: number` - Multicast port (default: 54321)
+  - `broadcastPort?: number` - Subnet UDP broadcast port (default: 54322)
+  - `enableBroadcast?: boolean` - Enable UDP broadcast fallback (default: true)
+  - `enableIdentityEndpoint?: boolean` - Automatically start the identity server endpoint on the specified port. (default: true)
   - `heartbeatInterval?: number` - Heartbeat interval in ms (default: 5000)
   - `offlineTimeout?: number` - Time before marking service offline (default: 15000)
   - `setupHooks?: boolean` - Setup SIGINT/SIGTERM hooks (default: true)
 
 #### Methods
+
+##### `scan(options: ScanOptions): Promise<ScanResult[]>`
+
+Actively scans your local network (LAN) for existing servers.
+Unlike traditional multicast which can be arbitrarily blocked by switches/routers, this runs a blazing-fast TCP Connect sequence across your whole subnet, followed by an HTTP probe for the identity endpoint.
+
+```typescript
+const discovery = new Discovery({ name: "scanner" }, 0); // 0 = client only
+await discovery.start();
+
+const results = await discovery.scan({
+  ports: [3000, 3001, 8080],
+  connectTimeout: 500, // Ms to wait for TCP connect (lower is faster)
+  concurrency: 100, // Max concurrent IPs to probe
+  registerResults: true, // Automatically add found services to the filterable registry
+});
+
+// Logs discovered open servers on your local network
+results.forEach((r) => console.log(r.ip, r.service?.name));
+```
+
+##### `getIdentityMiddleware(): Function`
+
+Provides an HTTP handler to inject the `/.well-known/discover` identity endpoint into an existing Node.js HTTP server natively, Express, Hono, or Bun.serve without spinning up a secondary standalone server port.
+
+```typescript
+// Example with Bun.serve
+Bun.serve({
+  port: 3000,
+  fetch(req) {
+    const url = new URL(req.url);
+    if (url.pathname === "/.well-known/discover") {
+      return new Response(
+        JSON.stringify(
+          discovery.getInternalRegistry().get(discovery.getServiceId()) || {
+            id: discovery.getServiceId(),
+            name: "my-service",
+            version: "1.0.0",
+            schema: "http",
+            port: 3000,
+          },
+        ),
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
+        },
+      );
+    }
+    return new Response("My Service is running");
+  },
+});
+```
 
 ##### `start(): Promise<void>`
 
@@ -203,6 +262,16 @@ See [`examples/client.ts`](examples/client.ts) for a complete example.
 bun run examples/client.ts
 ```
 
+### Active Network Scanning & TCP Fallback
+
+Run the scanner to discover all devices and open HTTP servers sitting on your network.
+
+See [`examples/active-scanner.ts`](examples/active-scanner.ts) for a complete example.
+
+```bash
+bun run examples/active-scanner.ts
+```
+
 ### Filtering Services
 
 ```typescript
@@ -276,13 +345,14 @@ const discovery = new Discovery(
 
 ## How It Works
 
-1. **Broadcast**: Each service broadcasts its presence via UDP multicast to `239.255.255.250:54321`
-2. **Message Types**:
-   - `hello` - Initial announcement when service starts
+1. **Active Identity Probe**: When a service calls `.scan()`, it performs extremely high-speed, non-blocking asynchronous TCP Connect scans across your auto-detected subnets (e.g. `192.168.0.0/24`). For ports that open, it sends HTTP `GET /.well-known/discover` JSON payload queries which uniquely identify the network graph immediately, even without UDP support natively.
+2. **Dual-Stack Broadcast**: Each service broadcasts its presence via UDP Multicast (`239.255.255.250:54321`) AND Subnet Broadcast (e.g., `192.168.1.255:54322`) ensuring the packets aren't dropped by strict managed routers.
+3. **Message Types**:
+   - `hello` - Initial announcement when service starts (triggers other machines to reply immediately with heartbeat payloads to quickly assemble connection graphs)
    - `heartbeat` - Periodic presence updates (every 5 seconds by default)
-   - `goodbye` - Notification when service stops
-3. **Registry**: Services maintain a local registry of discovered services
-4. **Offline Detection**: Services are marked offline if no heartbeat is received within the offline timeout (15 seconds by default)
+   - `goodbye` - Graceful notification when a service stops manually `discovery.stop()`
+4. **Registry**: Services maintain a local JSON registry matrix of all discovered peers.
+5. **Offline Detection**: Services are safely swept and marked offline if no heartbeat is received within the offline timeout threshold (15 seconds by default), pruning the network map appropriately.
 
 ## Testing
 
