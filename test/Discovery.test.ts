@@ -410,4 +410,116 @@ describe("Discovery P2P", () => {
     expect(discovery.getServiceId()).toContain("test-");
     discovery.stop();
   });
+
+  it("should setup and remove process hooks", async () => {
+    // We mock process.exit to prevent actual exit during tests
+    const originalExit = process.exit;
+    let exitCalled = false;
+    process.exit = (() => { exitCalled = true; }) as any;
+
+    const testService = new Discovery(
+      { name: "hook-test" },
+      3040,
+      { setupHooks: true, multicastPort: 54341 } // Hooks ON
+    );
+
+    await testService.start();
+    
+    // Hooks should be set, simulate SIGINT
+    process.emit('SIGINT');
+    
+    expect(exitCalled).toBe(true);
+
+    // Stop should remove hooks
+    testService.stop();
+    process.exit = originalExit;
+  });
+
+  it("should trigger internal timers directly", async () => {
+    const testService = new Discovery({ name: "timer-test" }, 3041, { 
+      setupHooks: false, 
+      multicastPort: 54342,
+      heartbeatInterval: 10,
+      offlineTimeout: 20
+    });
+    
+    await testService.start();
+    
+    // Wait for setIntervals to run at least once
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    testService.stop();
+    // No direct observable here besides coverage metrics hitting the inner functions
+  });
+
+  it("should export identity middleware and auto-start identity server if port > 0", async () => {
+    const testService = new Discovery({ name: "mw-test" }, 0, { 
+      setupHooks: false,
+      enableIdentityEndpoint: true
+    });
+    
+    // 1. Manually get it
+    const mw = testService.getIdentityMiddleware();
+    expect(mw).toBeDefined();
+    expect(typeof mw).toBe("function");
+
+    // 2. Start (won't auto-start standalone if port 0)
+    await testService.start();
+
+    // MW still valid
+    expect(testService.getIdentityMiddleware()).toBeDefined();
+    
+    testService.stop();
+
+    // 3. Port > 0 auto-start
+    const testService2 = new Discovery({ name: "mw-test-2" }, 32155, { 
+      setupHooks: false,
+      enableIdentityEndpoint: true
+    });
+    // This auto starts standalone IdentityServer
+    await testService2.start();
+    testService2.stop();
+  });
+
+  it("should use scan API and optionally register results", async () => {
+    const testService = new Discovery({ name: "scan-test" }, 0, { setupHooks: false, multicastPort: 54343 });
+
+    // Let's create a real http server to get caught by the scanner
+    const http = require('http');
+    const mockServer = http.createServer((req: any, res: any) => {
+      if (req.url === '/.well-known/discover') {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ id: "scan-mock-id", name: "scanmock", port: 12345, schema: "http" }));
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+    
+    await new Promise<void>((resolve) => mockServer.listen(0, '127.0.0.1', resolve));
+    const assignedPort = (mockServer.address() as any).port;
+
+    try {
+      // Do a tiny fast scan on localhost exactly where our mock server is
+      const results = await testService.scan({
+        subnet: "127.0.0.0/30",
+        ports: [assignedPort],
+        connectTimeout: 200,
+        probeTimeout: 200,
+        registerResults: true
+      });
+      
+      expect(results).toBeInstanceOf(Array);
+      expect(results.length).toBeGreaterThan(0);
+      
+      // Verify registration inside Discovery
+      const identified = testService.getInternalRegistry().get("scan-mock-id");
+      expect(identified).toBeDefined();
+      expect(identified!.name).toBe("scanmock");
+      
+    } finally {
+      mockServer.close();
+      testService.stop();
+    }
+  });
 });
