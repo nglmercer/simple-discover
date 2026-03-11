@@ -39,7 +39,9 @@ export class Discovery extends EventEmitter {
       id: serviceId,
       name: serviceInfo.name,
       version: serviceInfo.version,
-      schema: serviceInfo.schema || 'http'
+      schema: serviceInfo.schema || 'http',
+      host: serviceInfo.host,
+      baseUrl: serviceInfo.baseUrl,
     };
     this.port = port;
     

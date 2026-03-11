@@ -34,6 +34,8 @@ export class IdentityServer {
       name: this.serviceInfo.name,
       version: this.serviceInfo.version,
       schema: this.serviceInfo.schema || 'http',
+      host: this.serviceInfo.host,
+      baseUrl: this.serviceInfo.baseUrl,
       port: this.port,
       ...this.meta,
     };

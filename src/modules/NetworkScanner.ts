@@ -124,6 +124,8 @@ export class NetworkScanner {
               name: info.name || 'unknown',
               version: info.version || 'unknown',
               schema: info.schema || 'http',
+              host: info.host,
+              baseUrl: info.baseUrl,
               ip,
               port: info.port || port,
               lastSeen: Date.now(),

@@ -3,6 +3,10 @@ export interface ServiceInfo {
   name?: string;
   version?: string;
   schema?: string;
+  /** Custom hostname or domain (overrides IP in URLs) */
+  host?: string;
+  /** Full base URL (overrides all URL generation logic) */
+  baseUrl?: string;
 }
 
 export interface DiscoveredService extends ServiceInfo {
